@@ -5,6 +5,10 @@ VisualStudioVersion = 15.0.28307.102
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DataTools.Sync", "DataTools.Sync\DataTools.Sync.csproj", "{D1B1BF70-DB81-4027-8AE0-5F0C760E5DAC}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DataTools.Sync.Core", "DataTools.Sync.Core\DataTools.Sync.Core.csproj", "{CDB363A7-5297-46C5-BA29-F5EAEED5EFA8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DataTools.Sync.Model", "DataTools.Sync.Model\DataTools.Sync.Model.csproj", "{E56B3A2E-E509-431C-8C64-59EF23D53336}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -15,6 +19,14 @@ Global
 		{D1B1BF70-DB81-4027-8AE0-5F0C760E5DAC}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{D1B1BF70-DB81-4027-8AE0-5F0C760E5DAC}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{D1B1BF70-DB81-4027-8AE0-5F0C760E5DAC}.Release|Any CPU.Build.0 = Release|Any CPU
+		{CDB363A7-5297-46C5-BA29-F5EAEED5EFA8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CDB363A7-5297-46C5-BA29-F5EAEED5EFA8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CDB363A7-5297-46C5-BA29-F5EAEED5EFA8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CDB363A7-5297-46C5-BA29-F5EAEED5EFA8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E56B3A2E-E509-431C-8C64-59EF23D53336}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E56B3A2E-E509-431C-8C64-59EF23D53336}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E56B3A2E-E509-431C-8C64-59EF23D53336}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E56B3A2E-E509-431C-8C64-59EF23D53336}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
