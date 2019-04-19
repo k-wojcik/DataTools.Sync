@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using DataTools.Sync.Model.Configuration;
 using DataTools.Sync.Model.Schema;
+using Microsoft.Extensions.Logging;
 using SqlKata;
 using SqlKata.Execution;
 
@@ -18,6 +19,7 @@ namespace DataTools.Sync.Core
     public class TableSyncWorker : ITableSyncWorker
     {
         private readonly IDbConnectionFactory _connectionFactory;
+        private readonly ILogger<TableSyncWorker> _logger;
         private SynchronizationSet _syncSet;
         private QueryFactory _sourceQueryFactory;
         private QueryFactory _destinationQueryFactory;
@@ -30,9 +32,10 @@ namespace DataTools.Sync.Core
         private Query _sourceQuery;
         private Query _destinationQuery;
 
-        public TableSyncWorker(IDbConnectionFactory connectionFactory)
+        public TableSyncWorker(IDbConnectionFactory connectionFactory, ILogger<TableSyncWorker> logger)
         {
             _connectionFactory = connectionFactory;
+            _logger = logger;
             _sourceBuffer = new BufferedQueue<dynamic>(LoadSource, 1000);
             _destinationBuffer = new BufferedQueue<dynamic>(LoadDestination, 1000);
         }
@@ -40,17 +43,21 @@ namespace DataTools.Sync.Core
         private BufferRange<dynamic> LoadSource(BufferRange<dynamic> arg)
         {
             arg.Result = _sourceQuery.Clone().Offset(arg.Offset).Take(arg.Size).Get<dynamic>().ToList();
+            _logger.LogDebug("{TableName} - load source offset: {Offset} size: {Size} count: {Count}", _table.Name, arg.Offset, arg.Size, arg.Result.Count);
             return arg;
         }
 
         private BufferRange<dynamic> LoadDestination(BufferRange<dynamic> arg)
         {
             arg.Result = _destinationQuery.Clone().Offset(arg.Offset).Take(arg.Size).Get<dynamic>().ToList();
+            _logger.LogDebug("{TableName} - load destination offset: {Offset} size: {Size} count: {Count}", _table.Name, arg.Offset, arg.Size, arg.Result.Count);
             return arg;
         }
 
         public async Task<bool> Sync(SynchronizationSet syncSet, Table table, TableSchema tableSchema)
         {
+            _logger.LogInformation("{TableName} - sync started", table.Name);
+
             _syncSet = syncSet;
             _table = table;
             _tableSchema = tableSchema;
@@ -64,6 +71,8 @@ namespace DataTools.Sync.Core
             SetIdentityInsertOn();
             Merge();
             SetIdentityInsertOff();
+
+            _logger.LogInformation("{TableName} - sync completed", table.Name);
             return true;
         }
 
@@ -75,6 +84,11 @@ namespace DataTools.Sync.Core
             while (currentSourceRow != null || currentDestinationRow != null)
             {
                 var joinResult = Join(currentSourceRow, currentDestinationRow);
+                if (_logger.IsEnabled(LogLevel.Trace))
+                {
+                    _logger.LogTrace("Compare {TableName} {SourceRaw} {DestinationRaw} = {JoinResult}", _table.Name, (IDictionary<string, object>) currentSourceRow, (IDictionary<string, object>) currentDestinationRow, (object) joinResult);
+                }
+
                 if (joinResult == MergeJoinResult.Equal)
                 {
                     UpdateDestination(currentSourceRow);
@@ -110,7 +124,7 @@ namespace DataTools.Sync.Core
             for (int i = 0; i < _primaryKeys.Count; i++)
             {
                 ColumnSchema column = _primaryKeys[i];
-                int result = 0;
+                int result;
                 if (column.Type == "varchar" || column.Type == "nvarchar" || column.Type == "char" || column.Type == "nchar" || column.Type == "text" || column.Type == "ntext")
                 {
                     result = string.Compare(source[column.Name].ToString(), destination[column.Name].ToString(), StringComparison.OrdinalIgnoreCase);
@@ -147,16 +161,30 @@ namespace DataTools.Sync.Core
 
         private void InsertDestination(IDictionary<string, object> row)
         {
-            _destinationQueryFactory.Query(_tableSchema.Name).Insert(row.ToDictionary(x=>x.Key, x=>x.Value));
+            var insertQuery = _destinationQueryFactory.Query(_tableSchema.Name).AsInsert(row.ToDictionary(x => x.Key, x => x.Value));
+
+            if (_logger.IsEnabled(LogLevel.Trace))
+            {
+                _logger.LogTrace("Insert {TableName} {Sql}", _table.Name, _destinationQueryFactory.Compiler.Compile(insertQuery).ToString());
+            }
+           
+            insertQuery.Get();
         }
 
         private void UpdateDestination(IDictionary<string, object> row)
         {
-            _destinationQueryFactory.Query(_tableSchema.Name)
+            var updateQuery = _destinationQueryFactory.Query(_tableSchema.Name)
                 .Where(row.Where(x =>
                         _primaryKeys.Any(pk => pk.Name == x.Key)).ToDictionary(x => x.Key, x => x.Value)
                 )
-                .Update(row.Where(x=> _identityColumns.All(y => y.Name != x.Key)).ToDictionary(x => x.Key, x => x.Value));
+                .AsUpdate(row.Where(x => _identityColumns.All(y => y.Name != x.Key)).ToDictionary(x => x.Key, x => x.Value));
+
+            if (_logger.IsEnabled(LogLevel.Trace))
+            {
+                _logger.LogTrace("update {TableName} {Sql}", _table.Name, _destinationQueryFactory.Compiler.Compile(updateQuery).ToString());
+            }
+
+            updateQuery.Get();
         }
 
         private Query BuildMainQuery(QueryFactory queryFactory)
@@ -218,6 +246,7 @@ namespace DataTools.Sync.Core
         {
             if (_identityColumns.Any())
             {
+                _logger.LogDebug("{TableName} - set identity insert on", _table.Name);
                 _destinationQueryFactory.Statement($"SET IDENTITY_INSERT {_table.Name} ON");
             }
         }
@@ -226,6 +255,7 @@ namespace DataTools.Sync.Core
         {
             if (_identityColumns.Any())
             {
+                _logger.LogDebug("{TableName} - set identity insert off", _table.Name);
                 _destinationQueryFactory.Statement($"SET IDENTITY_INSERT {_table.Name} OFF");
             }
         }

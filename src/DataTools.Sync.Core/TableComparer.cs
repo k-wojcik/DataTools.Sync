@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using DataTools.Sync.Model.Configuration;
 using DataTools.Sync.Model.Schema;
+using Microsoft.Extensions.Logging;
 using SqlKata.Execution;
 
 namespace DataTools.Sync.Core
@@ -16,13 +17,15 @@ namespace DataTools.Sync.Core
     public class TableComparer : ITableComparer
     {
         private readonly IDbConnectionFactory _connectionFactory;
+        private readonly ILogger<TableComparer> _logger;
         private SynchronizationSet _syncSet;
         private QueryFactory _sourceQuery;
         private QueryFactory _destinationQuery;
 
-        public TableComparer(IDbConnectionFactory connectionFactory)
+        public TableComparer(IDbConnectionFactory connectionFactory, ILogger<TableComparer> logger)
         {
             _connectionFactory = connectionFactory;
+            _logger = logger;
         }
 
         public async Task<bool> Compare(SynchronizationSet syncSet)
@@ -36,27 +39,38 @@ namespace DataTools.Sync.Core
 
         private bool Compare(List<TableSchema> sourceTables, List<TableSchema> destinationTables)
         {
+            bool isValid = true;
             foreach (var table in _syncSet.Tables)
             {
+                _logger.LogInformation("Compare table {TableName}", table.Name);
+
                 var sourceTable = sourceTables.FirstOrDefault(x => x.Name == table.Name);
                 var destinationTable = destinationTables.FirstOrDefault(x => x.Name == table.Name);
 
                 if (sourceTable == null || destinationTable == null)
                 {
-                    return false;
+                    _logger.LogError("{TableSource} table {TableName} not exist", sourceTable == null ? "Source" : "Destination", table.Name);
+                    isValid = false;
+                    continue;
                 }
 
                 if (!Compare(table, sourceTable.Columns, destinationTable.Columns))
                 {
-                    return false;
+                    _logger.LogError("Table compare for {TableName} failed", table.Name);
+                    isValid = false;
+                }
+                else
+                {
+                    _logger.LogInformation("Compare table {TableName} - valid", table.Name);
                 }
             }
 
-            return true;
+            return isValid;
         }
 
         private bool Compare(Table table, List<ColumnSchema> sourceColumns, List<ColumnSchema> destinationColumns)
         {
+            bool isValid = true;
             foreach (var sourceColumn in sourceColumns)
             {
                 var destinationColumn = destinationColumns.FirstOrDefault(x => x.Name == sourceColumn.Name);
@@ -67,46 +81,52 @@ namespace DataTools.Sync.Core
 
                 if (sourceColumn.IsIdentity != destinationColumn.IsIdentity)
                 {
-                    throw new ArgumentException($"Source/Destination {table.Name}.{sourceColumn.Name} identity column mismatch");
+                    _logger.LogError("Source/Destination {TableName}.{ColumnName} identity column mismatch", table.Name, sourceColumn.Name);
+                    isValid = false;
                 }
 
                 if (sourceColumn.IsComputed)
                 {
-                    throw new ArgumentException($"Source column {table.Name}.{sourceColumn.Name} is computed");
+                    _logger.LogError("Source column {TableName}.{ColumnName} is computed", table.Name, sourceColumn.Name);
+                    isValid = false;
                 }
 
                 if (destinationColumn.IsComputed)
                 {
-                    throw new ArgumentException($"Destination column {table.Name}.{destinationColumn.Name} is computed");
+                    _logger.LogError("Destination column {TableName}.{ColumnName} is computed", table.Name, destinationColumn.Name);
+                    isValid = false;
                 }
 
                 if (sourceColumn.IsNullable != destinationColumn.IsNullable && destinationColumn.IsNullable == false)
                 {
-                    throw new ArgumentException($"Destination column {table.Name}.{destinationColumn.Name} is not nullable when source column is nullable!");
+                    _logger.LogError("Destination column {TableName}.{ColumnName} is not nullable when source column is nullable!", table.Name, destinationColumn.Name);
+                    isValid = false;
                 }
 
                 if (sourceColumn.Type != destinationColumn.Type)
                 {
-                    throw new ArgumentException($"Destination/source column {table.Name}.{destinationColumn.Name} type mismatch (source: {sourceColumn.Type} destination: {destinationColumn.Type})!");
+                    _logger.LogError("Destination/source column {TableName}.{ColumnName} type mismatch (source: {SourceColumnType} destination: {DestinationColumnType})!", table.Name, destinationColumn.Name, sourceColumn.Type, destinationColumn.Type);
+                    isValid = false;
                 }
 
                 if (sourceColumn.MaxLength > destinationColumn.MaxLength && destinationColumn.MaxLength != -1)
                 {
-                    throw new ArgumentException($"Source column {table.Name}.{destinationColumn.Name} has a longer length (source: {sourceColumn.MaxLength} destination: {destinationColumn.MaxLength})!");
+                    _logger.LogError("Source column {TableName}.{ColumnName} has a longer length (source: {SourceColumnMaxLength} destination: {DestinationColumnMaxLength})!", table.Name, destinationColumn.Name, sourceColumn.MaxLength, destinationColumn.MaxLength);
+                    isValid = false;
                 }
 
-                if (sourceColumn.Precision == destinationColumn.Precision)
+                if (sourceColumn.Precision != destinationColumn.Precision)
                 {
-                    
+
                 }
 
-                if (sourceColumn.Scale == destinationColumn.Scale)
+                if (sourceColumn.Scale != destinationColumn.Scale)
                 {
 
                 }
             }
 
-            return true;
+            return isValid;
         }
 
     }

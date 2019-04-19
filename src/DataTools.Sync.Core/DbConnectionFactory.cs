@@ -26,6 +26,7 @@ namespace DataTools.Sync.Core
             var connection = new SqlConnection(_config.Get().SynchronizationSets.Single(x=>x.Name == synchronizationSet).Source.ConnectionString);
             connection.Open();
             var compiler = new SqlServerCompiler();
+            compiler.UseLegacyPagination = false;
             return new QueryFactory(connection, compiler);
         }
 
@@ -34,6 +35,7 @@ namespace DataTools.Sync.Core
             var connection = new SqlConnection(_config.Get().SynchronizationSets.Single(x => x.Name == synchronizationSet).Destination.ConnectionString);
             connection.Open();
             var compiler = new SqlServerCompiler();
+            compiler.UseLegacyPagination = false;
             return new QueryFactory(connection, compiler);
         }
     }

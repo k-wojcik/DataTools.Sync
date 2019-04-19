@@ -3,6 +3,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using DataTools.Sync.Model.Configuration;
 using DataTools.Sync.Model.Schema;
+using Microsoft.Extensions.Logging;
 using SqlKata.Execution;
 
 namespace DataTools.Sync.Core
@@ -15,17 +16,21 @@ namespace DataTools.Sync.Core
     public class LoadSchema : ILoadSchema
     {
         private readonly IDbConnectionFactory _connectionFactory;
+        private readonly ILogger _logger;
         private SynchronizationSet _syncSet;
         private QueryFactory _sourceQuery;
         private QueryFactory _destinationQuery;
 
-        public LoadSchema(IDbConnectionFactory connectionFactory)
+        public LoadSchema(IDbConnectionFactory connectionFactory, ILogger<LoadSchema> logger)
         {
             _connectionFactory = connectionFactory;
+            _logger = logger;
         }
 
         public async Task<bool> Load(SynchronizationSet syncSet)
         {
+            _logger.LogInformation("Load {SyncSetName} schema", syncSet.Name);
+
             _syncSet = syncSet;
             _sourceQuery = _connectionFactory.GetSource(syncSet.Name);
             _destinationQuery = _connectionFactory.GetDestination(syncSet.Name);
@@ -35,11 +40,15 @@ namespace DataTools.Sync.Core
 
             foreach (var table in sourceTables)
             {
+                _logger.LogDebug("Load source table {TableName} schema", table.Name);
+
                 table.Columns = (await GetTableColumns(_sourceQuery, table.ObjectId)).ToList();
             }
 
             foreach (var table in destinationTables)
             {
+                _logger.LogDebug("Load destination table {TableName} schema", table.Name);
+
                 table.Columns = (await GetTableColumns(_destinationQuery, table.ObjectId)).ToList();
             }
 
@@ -51,6 +60,8 @@ namespace DataTools.Sync.Core
             {
                 Tables = destinationTables
             };
+
+            _logger.LogInformation("Loaded {SyncSetName} schema", syncSet.Name);
             return true;
         }
 
@@ -90,7 +101,9 @@ namespace DataTools.Sync.Core
                             AND co.CONSTRAINT_NAME = K.CONSTRAINT_NAME
                         WHERE co.CONSTRAINT_TYPE = 'PRIMARY KEY' AND co.TABLE_NAME = o.name AND K.COLUMN_NAME = c.name
                 ), 0)  AS IsPrimaryKey");
-            
+
+         //   string sql = _sourceQuery.Compiler.Compile(query).ToString();              
+
             return query.GetAsync<ColumnSchema>();
         }
     }
