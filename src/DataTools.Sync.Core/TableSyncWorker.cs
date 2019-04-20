@@ -31,6 +31,8 @@ namespace DataTools.Sync.Core
         private IList<ColumnSchema> _identityColumns;
         private Query _sourceQuery;
         private Query _destinationQuery;
+        private IList<IDictionary<string, object>> _insertBuffer = new List<IDictionary<string, object>>();
+        private IList<IDictionary<string, object>> _updateBuffer = new List<IDictionary<string, object>>();
 
         public TableSyncWorker(IDbConnectionFactory connectionFactory, ILogger<TableSyncWorker> logger)
         {
@@ -70,6 +72,8 @@ namespace DataTools.Sync.Core
 
             SetIdentityInsertOn();
             Merge();
+            FinalizeInsertDestination();
+            FinalizeUpdateDestination();
             SetIdentityInsertOff();
 
             _logger.LogInformation("{TableName} - sync completed", table.Name);
@@ -91,14 +95,14 @@ namespace DataTools.Sync.Core
 
                 if (joinResult == MergeJoinResult.Equal)
                 {
-                    UpdateDestination(currentSourceRow);
+                    UpdateDestination((IDictionary<string, object>)currentSourceRow);
 
                     _sourceBuffer.TryDequeue(out currentSourceRow);
                     _destinationBuffer.TryDequeue(out currentDestinationRow);
                 }
                 else if (joinResult == MergeJoinResult.DestinationNotExists)
                 {
-                    InsertDestination(currentSourceRow);
+                    InsertDestination((IDictionary<string, object>)currentSourceRow);
 
                     _sourceBuffer.TryDequeue(out currentSourceRow);
                 }
@@ -161,30 +165,73 @@ namespace DataTools.Sync.Core
 
         private void InsertDestination(IDictionary<string, object> row)
         {
-            var insertQuery = _destinationQueryFactory.Query(_tableSchema.Name).AsInsert(row.ToDictionary(x => x.Key, x => x.Value));
+            int sqlServerBatchLimit = 2000;
+            if (_insertBuffer.Count * row.Keys.Count >= sqlServerBatchLimit)
+            {
+                InsertDestination(_insertBuffer.ToArray());
+                _insertBuffer = new List<IDictionary<string, object>>();
+            }
+            _insertBuffer.Add(row);
+        }
+
+        private void FinalizeInsertDestination()
+        {
+            if (_insertBuffer.Count > 0)
+            {
+                InsertDestination(_insertBuffer.ToArray());
+                _insertBuffer = new List<IDictionary<string, object>>();
+            }
+        }
+
+        private void UpdateDestination(IDictionary<string, object> row)
+        {
+            _updateBuffer.Add(row);
+            if (_updateBuffer.Count > 100)
+            {
+                UpdateDestination(_updateBuffer.ToArray());
+                _updateBuffer = new List<IDictionary<string, object>>();
+            }
+        }
+
+        private void FinalizeUpdateDestination()
+        {
+            if (_updateBuffer.Count > 0)
+            {
+                UpdateDestination(_updateBuffer.ToArray());
+                _updateBuffer = new List<IDictionary<string, object>>();
+            }
+        }
+
+        private void InsertDestination(IDictionary<string, object>[] rows)
+        {
+            var firstRow = rows.First();
+            var insertQuery = _destinationQueryFactory.Query(_tableSchema.Name).AsInsert(firstRow.Select(x=>x.Key), rows.Select(x => x.Values));
 
             if (_logger.IsEnabled(LogLevel.Trace))
             {
                 _logger.LogTrace("Insert {TableName} {Sql}", _table.Name, _destinationQueryFactory.Compiler.Compile(insertQuery).ToString());
             }
-           
+
             insertQuery.Get();
         }
 
-        private void UpdateDestination(IDictionary<string, object> row)
+        private void UpdateDestination(IDictionary<string, object>[] rows)
         {
-            var updateQuery = _destinationQueryFactory.Query(_tableSchema.Name)
-                .Where(row.Where(x =>
-                        _primaryKeys.Any(pk => pk.Name == x.Key)).ToDictionary(x => x.Key, x => x.Value)
-                )
-                .AsUpdate(row.Where(x => _identityColumns.All(y => y.Name != x.Key)).ToDictionary(x => x.Key, x => x.Value));
-
-            if (_logger.IsEnabled(LogLevel.Trace))
+            foreach (var row in rows)
             {
-                _logger.LogTrace("update {TableName} {Sql}", _table.Name, _destinationQueryFactory.Compiler.Compile(updateQuery).ToString());
-            }
+                var updateQuery = _destinationQueryFactory.Query(_tableSchema.Name)
+                    .Where(row.Where(x =>
+                            _primaryKeys.Any(pk => pk.Name == x.Key)).ToDictionary(x => x.Key, x => x.Value)
+                    )
+                    .AsUpdate(row.Where(x => _identityColumns.All(y => y.Name != x.Key)).ToDictionary(x => x.Key, x => x.Value));
 
-            updateQuery.Get();
+                if (_logger.IsEnabled(LogLevel.Trace))
+                {
+                    _logger.LogTrace("update {TableName} {Sql}", _table.Name, _destinationQueryFactory.Compiler.Compile(updateQuery).ToString());
+                }
+
+                updateQuery.Get();
+            }
         }
 
         private Query BuildMainQuery(QueryFactory queryFactory)
