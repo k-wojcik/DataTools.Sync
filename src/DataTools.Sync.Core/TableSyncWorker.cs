@@ -1,6 +1,6 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
-using System.Dynamic;
 using System.Linq;
 using System.Threading.Tasks;
 using DataTools.Sync.Model.Configuration;
@@ -25,8 +25,8 @@ namespace DataTools.Sync.Core
         private QueryFactory _destinationQueryFactory;
         private TableSchema _tableSchema;
         private Table _table;
-        private BufferedQueue<dynamic> _sourceBuffer;
-        private BufferedQueue<dynamic> _destinationBuffer;
+        private readonly BufferedQueue<dynamic> _sourceBuffer;
+        private readonly BufferedQueue<dynamic> _destinationBuffer;
         private IList<ColumnSchema> _primaryKeys;
         private IList<ColumnSchema> _identityColumns;
         private Query _sourceQuery;
@@ -128,22 +128,14 @@ namespace DataTools.Sync.Core
             for (int i = 0; i < _primaryKeys.Count; i++)
             {
                 ColumnSchema column = _primaryKeys[i];
-                int result;
+                int result = 0;
                 if (column.Type == "varchar" || column.Type == "nvarchar" || column.Type == "char" || column.Type == "nchar" || column.Type == "text" || column.Type == "ntext")
                 {
-                    result = string.Compare(source[column.Name].ToString(), destination[column.Name].ToString(), StringComparison.OrdinalIgnoreCase);
-                    if (result < 0)
-                    {
-                        return MergeJoinResult.DestinationNotExists;
-                    }
-                    if (result > 0)
-                    {
-                        return MergeJoinResult.SourceNotExists;
-                    }
+                    result = string.Compare(source[column.Name]?.ToString(), destination[column.Name]?.ToString(), StringComparison.OrdinalIgnoreCase);
                 }
                 else if (column.Type == "tinyint" || column.Type == "smallint" || column.Type == "int" || column.Type == "bigint")
                 {
-                    result = Convert.ToInt64((source[column.Name])).CompareTo(Convert.ToInt64(destination[column.Name]));
+                    result = Comparer.DefaultInvariant.Compare(source[column.Name], destination[column.Name]);
                 }
                 else
                 {
