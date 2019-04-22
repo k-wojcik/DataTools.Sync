@@ -16,16 +16,16 @@ namespace DataTools.Sync.Core
     {
         private readonly ITableComparer _tableComparer;
         private readonly ILoadSchema _loadSchema;
-        private readonly IDbConnectionFactory _connectionFactory;
+        private readonly IDbQueryFactory _queryFactory;
         private readonly ILogger<SyncSetWorker> _logger;
         private readonly IServiceProvider _serviceProvider;
 
-        public SyncSetWorker(ITableComparer tableComparer, ILoadSchema loadSchema, IDbConnectionFactory connectionFactory, ILogger<SyncSetWorker> logger, IServiceProvider serviceProvider)
+        public SyncSetWorker(ITableComparer tableComparer, ILoadSchema loadSchema, IDbQueryFactory queryFactory, ILogger<SyncSetWorker> logger, IServiceProvider serviceProvider)
         {
 
             _tableComparer = tableComparer;
             _loadSchema = loadSchema;
-            _connectionFactory = connectionFactory;
+            _queryFactory = queryFactory;
             _logger = logger;
             _serviceProvider = serviceProvider;
         }

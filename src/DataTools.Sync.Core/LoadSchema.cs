@@ -15,15 +15,15 @@ namespace DataTools.Sync.Core
 
     public class LoadSchema : ILoadSchema
     {
-        private readonly IDbConnectionFactory _connectionFactory;
+        private readonly IDbQueryFactory _queryFactory;
         private readonly ILogger _logger;
         private SynchronizationSet _syncSet;
         private QueryFactory _sourceQuery;
         private QueryFactory _destinationQuery;
 
-        public LoadSchema(IDbConnectionFactory connectionFactory, ILogger<LoadSchema> logger)
+        public LoadSchema(IDbQueryFactory queryFactory, ILogger<LoadSchema> logger)
         {
-            _connectionFactory = connectionFactory;
+            _queryFactory = queryFactory;
             _logger = logger;
         }
 
@@ -32,20 +32,20 @@ namespace DataTools.Sync.Core
             _logger.LogInformation("Load {SyncSetName} schema", syncSet.Name);
 
             _syncSet = syncSet;
-            _sourceQuery = _connectionFactory.GetSource(syncSet.Name);
-            _destinationQuery = _connectionFactory.GetDestination(syncSet.Name);
+            _sourceQuery = _queryFactory.GetSource(syncSet.Name);
+            _destinationQuery = _queryFactory.GetDestination(syncSet.Name);
 
             List<TableSchema> sourceTables = (await GetTables(_sourceQuery)).ToList();
             List<TableSchema> destinationTables = (await GetTables(_destinationQuery)).ToList();
 
-            foreach (var table in sourceTables)
+            foreach (var table in sourceTables.Where(x=> syncSet.Tables.Any(table=> table.Name == x.Name)))
             {
                 _logger.LogDebug("Load source table {TableName} schema", table.Name);
 
                 table.Columns = (await GetTableColumns(_sourceQuery, table.ObjectId)).ToList();
             }
 
-            foreach (var table in destinationTables)
+            foreach (var table in destinationTables.Where(x => syncSet.Tables.Any(table => table.Name == x.Name)))
             {
                 _logger.LogDebug("Load destination table {TableName} schema", table.Name);
 

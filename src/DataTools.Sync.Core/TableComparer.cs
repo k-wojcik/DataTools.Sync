@@ -16,23 +16,23 @@ namespace DataTools.Sync.Core
 
     public class TableComparer : ITableComparer
     {
-        private readonly IDbConnectionFactory _connectionFactory;
+        private readonly IDbQueryFactory _queryFactory;
         private readonly ILogger<TableComparer> _logger;
         private SynchronizationSet _syncSet;
         private QueryFactory _sourceQuery;
         private QueryFactory _destinationQuery;
 
-        public TableComparer(IDbConnectionFactory connectionFactory, ILogger<TableComparer> logger)
+        public TableComparer(IDbQueryFactory queryFactory, ILogger<TableComparer> logger)
         {
-            _connectionFactory = connectionFactory;
+            _queryFactory = queryFactory;
             _logger = logger;
         }
 
         public async Task<bool> Compare(SynchronizationSet syncSet)
         {
             _syncSet = syncSet;
-            _sourceQuery = _connectionFactory.GetSource(syncSet.Name);
-            _destinationQuery = _connectionFactory.GetDestination(syncSet.Name);
+            _sourceQuery = _queryFactory.GetSource(syncSet.Name);
+            _destinationQuery = _queryFactory.GetDestination(syncSet.Name);
             
             return Compare(syncSet.SourceDatabase.Tables, syncSet.DestinationDatabase.Tables);
         }
@@ -49,7 +49,14 @@ namespace DataTools.Sync.Core
 
                 if (sourceTable == null || destinationTable == null)
                 {
-                    _logger.LogError("{TableSource} table {TableName} not exist", sourceTable == null ? "Source" : "Destination", table.Name);
+                    if (sourceTable == null)
+                    {
+                        _logger.LogError("Source table {TableName} does not exist", table.Name);
+                    }
+                    if (destinationTable == null)
+                    {
+                        _logger.LogError("Destination table {TableName} does not exist", table.Name);
+                    }
                     isValid = false;
                     continue;
                 }

@@ -18,7 +18,7 @@ namespace DataTools.Sync.Core
 
     public class TableSyncWorker : ITableSyncWorker
     {
-        private readonly IDbConnectionFactory _connectionFactory;
+        private readonly IDbQueryFactory _queryFactory;
         private readonly ILogger<TableSyncWorker> _logger;
         private SynchronizationSet _syncSet;
         private QueryFactory _sourceQueryFactory;
@@ -34,9 +34,9 @@ namespace DataTools.Sync.Core
         private IList<IDictionary<string, object>> _insertBuffer = new List<IDictionary<string, object>>();
         private IList<IDictionary<string, object>> _updateBuffer = new List<IDictionary<string, object>>();
 
-        public TableSyncWorker(IDbConnectionFactory connectionFactory, ILogger<TableSyncWorker> logger)
+        public TableSyncWorker(IDbQueryFactory queryFactory, ILogger<TableSyncWorker> logger)
         {
-            _connectionFactory = connectionFactory;
+            _queryFactory = queryFactory;
             _logger = logger;
             _sourceBuffer = new BufferedQueue<dynamic>(LoadSource, 1000);
             _destinationBuffer = new BufferedQueue<dynamic>(LoadDestination, 1000);
@@ -63,8 +63,8 @@ namespace DataTools.Sync.Core
             _syncSet = syncSet;
             _table = table;
             _tableSchema = tableSchema;
-            _sourceQueryFactory = _connectionFactory.GetSource(syncSet.Name);
-            _destinationQueryFactory = _connectionFactory.GetDestination(syncSet.Name);
+            _sourceQueryFactory = _queryFactory.GetSource(syncSet.Name);
+            _destinationQueryFactory = _queryFactory.GetDestination(syncSet.Name);
             _primaryKeys = _tableSchema.Columns.Where(x => x.IsPrimaryKey).ToList();
             _identityColumns = _tableSchema.Columns.Where(x => x.IsIdentity).ToList();
             _sourceQuery = BuildSourceQuery(BuildMainQuery(_sourceQueryFactory));

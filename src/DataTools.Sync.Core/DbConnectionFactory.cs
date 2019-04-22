@@ -1,22 +1,21 @@
 ﻿using System.Data.SqlClient;
 using System.Linq;
-using Microsoft.Extensions.Configuration;
 using SqlKata.Compilers;
 using SqlKata.Execution;
 
 namespace DataTools.Sync.Core
 {
-    public interface IDbConnectionFactory
+    public interface IDbQueryFactory
     {
         QueryFactory GetSource(string synchronizationSet);
         QueryFactory GetDestination(string synchronizationSet);
     }
 
-    public class DbConnectionFactory : IDbConnectionFactory
+    public class DbQueryFactory : IDbQueryFactory
     {
         private readonly IAppConfig _config;
 
-        public DbConnectionFactory(IAppConfig config)
+        public DbQueryFactory(IAppConfig config)
         {
             _config = config;
         }
