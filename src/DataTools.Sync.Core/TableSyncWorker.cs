@@ -235,6 +235,16 @@ namespace DataTools.Sync.Core
                 query.Select($"{_tableSchema.Name}.{column.Name}");
             }
 
+            if (!string.IsNullOrWhiteSpace(_table.From))
+            {
+                query.FromRaw(ReplaceVariables(_table.From));
+            }
+
+            if (!string.IsNullOrWhiteSpace(_table.Filter))
+            {
+                query.WhereRaw(ReplaceVariables(_table.Filter));
+            }
+
             if (_table.SortColumns != null && _table.SortColumns.Length > 0)
             {
                 foreach (var column in _table.SortColumns)
