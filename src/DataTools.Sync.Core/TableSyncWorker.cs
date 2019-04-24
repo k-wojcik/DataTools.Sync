@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Data.SqlClient;
 using System.Linq;
 using System.Threading.Tasks;
 using DataTools.Sync.Model.Configuration;
@@ -52,7 +53,7 @@ namespace DataTools.Sync.Core
                     arg.Result = _sourceQuery.Clone().Offset(arg.Offset).Take(arg.Size).Get<dynamic>().ToList();
                     retryCount = 0;
                 }
-                catch (TimeoutException e)
+                catch (SqlException e)
                 {
                     _logger.LogError(e, "{TableName} - timeout: {Offset} size: {Size}", _table.Name, arg.Offset, arg.Size);
                 }
@@ -72,7 +73,7 @@ namespace DataTools.Sync.Core
                     arg.Result = _destinationQuery.Clone().Offset(arg.Offset).Take(arg.Size).Get<dynamic>().ToList();
                     retryCount = 0;
                 }
-                catch (TimeoutException e)
+                catch (SqlException e)
                 {
                     _logger.LogError(e, "{TableName} - timeout: {Offset} size: {Size}", _table.Name, arg.Offset, arg.Size);
                 }

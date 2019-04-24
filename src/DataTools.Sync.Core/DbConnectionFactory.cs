@@ -22,20 +22,28 @@ namespace DataTools.Sync.Core
 
         public QueryFactory GetSource(string synchronizationSet)
         {
-            var connection = new SqlConnection(_config.Get().SynchronizationSets.Single(x=>x.Name == synchronizationSet).Source.ConnectionString);
+            var config = _config.Get().SynchronizationSets.Single(x => x.Name == synchronizationSet);
+
+            var connection = new SqlConnection(config.Source.ConnectionString);
             connection.Open();
             var compiler = new SqlServerCompiler();
             compiler.UseLegacyPagination = false;
-            return new QueryFactory(connection, compiler);
+            var queryFactory = new QueryFactory(connection, compiler);
+            queryFactory.QueryTimeout = config.Source.Timeout ?? 30;
+            return queryFactory;
         }
 
         public QueryFactory GetDestination(string synchronizationSet)
         {
-            var connection = new SqlConnection(_config.Get().SynchronizationSets.Single(x => x.Name == synchronizationSet).Destination.ConnectionString);
+            var config = _config.Get().SynchronizationSets.Single(x => x.Name == synchronizationSet);
+
+            var connection = new SqlConnection(config.Destination.ConnectionString);
             connection.Open();
             var compiler = new SqlServerCompiler();
             compiler.UseLegacyPagination = false;
-            return new QueryFactory(connection, compiler);
+            var queryFactory = new QueryFactory(connection, compiler);
+            queryFactory.QueryTimeout = config.Source.Timeout ?? 30;
+            return queryFactory;
         }
     }
 }
