@@ -83,6 +83,8 @@ namespace DataTools.Sync.Core
                 var destinationColumn = destinationColumns.FirstOrDefault(x => x.Name == sourceColumn.Name);
                 if (destinationColumn == null)
                 {
+                    _logger.LogError("Destination column {TableName}.{ColumnName} does not exist", table.Name, sourceColumn.Name);
+                    isValid = false;
                     continue;
                 }
 

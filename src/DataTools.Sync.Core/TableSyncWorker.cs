@@ -44,14 +44,41 @@ namespace DataTools.Sync.Core
 
         private BufferRange<dynamic> LoadSource(BufferRange<dynamic> arg)
         {
-            arg.Result = _sourceQuery.Clone().Offset(arg.Offset).Take(arg.Size).Get<dynamic>().ToList();
+            int retryCount = 5;
+            do
+            {
+                try
+                {
+                    arg.Result = _sourceQuery.Clone().Offset(arg.Offset).Take(arg.Size).Get<dynamic>().ToList();
+                    retryCount = 0;
+                }
+                catch (TimeoutException e)
+                {
+                    _logger.LogError(e, "{TableName} - timeout: {Offset} size: {Size}", _table.Name, arg.Offset, arg.Size);
+                }
+            } while (retryCount-- > 0);
+
             _logger.LogDebug("{TableName} - load source offset: {Offset} size: {Size} count: {Count}", _table.Name, arg.Offset, arg.Size, arg.Result.Count);
             return arg;
         }
 
         private BufferRange<dynamic> LoadDestination(BufferRange<dynamic> arg)
         {
-            arg.Result = _destinationQuery.Clone().Offset(arg.Offset).Take(arg.Size).Get<dynamic>().ToList();
+            int retryCount = 5;
+            do
+            {
+                try
+                {
+                    arg.Result = _destinationQuery.Clone().Offset(arg.Offset).Take(arg.Size).Get<dynamic>().ToList();
+                    retryCount = 0;
+                }
+                catch (TimeoutException e)
+                {
+                    _logger.LogError(e, "{TableName} - timeout: {Offset} size: {Size}", _table.Name, arg.Offset, arg.Size);
+                }
+            } while (retryCount-- > 0);
+          
+
             _logger.LogDebug("{TableName} - load destination offset: {Offset} size: {Size} count: {Count}", _table.Name, arg.Offset, arg.Size, arg.Result.Count);
             return arg;
         }
@@ -108,6 +135,11 @@ namespace DataTools.Sync.Core
                 }
                 else if (joinResult == MergeJoinResult.SourceNotExists)
                 {
+                    if (_table.AllowDeleteDestination == true)
+                    {
+                        DeleteDestination((IDictionary<string, object>)currentSourceRow);
+                    }
+
                     _destinationBuffer.TryDequeue(out currentDestinationRow);
                 }
             }
@@ -157,6 +189,11 @@ namespace DataTools.Sync.Core
 
         private void InsertDestination(IDictionary<string, object> row)
         {
+            if (_syncSet.IsDryRun)
+            {
+                return;
+            }
+
             int sqlServerBatchLimit = 2000;
             if (_insertBuffer.Count * row.Keys.Count >= sqlServerBatchLimit)
             {
@@ -168,6 +205,11 @@ namespace DataTools.Sync.Core
 
         private void FinalizeInsertDestination()
         {
+            if (_syncSet.IsDryRun)
+            {
+                return;
+            }
+
             if (_insertBuffer.Count > 0)
             {
                 InsertDestination(_insertBuffer.ToArray());
@@ -177,6 +219,11 @@ namespace DataTools.Sync.Core
 
         private void UpdateDestination(IDictionary<string, object> row)
         {
+            if (_syncSet.IsDryRun)
+            {
+                return;
+            }
+
             _updateBuffer.Add(row);
             if (_updateBuffer.Count > 100)
             {
@@ -187,6 +234,11 @@ namespace DataTools.Sync.Core
 
         private void FinalizeUpdateDestination()
         {
+            if (_syncSet.IsDryRun)
+            {
+                return;
+            }
+
             if (_updateBuffer.Count > 0)
             {
                 UpdateDestination(_updateBuffer.ToArray());
@@ -196,6 +248,11 @@ namespace DataTools.Sync.Core
 
         private void InsertDestination(IDictionary<string, object>[] rows)
         {
+            if (_syncSet.IsDryRun)
+            {
+                return;
+            }
+
             var firstRow = rows.First();
             var insertQuery = _destinationQueryFactory.Query(_tableSchema.Name).AsInsert(firstRow.Select(x=>x.Key), rows.Select(x => x.Values));
 
@@ -209,6 +266,11 @@ namespace DataTools.Sync.Core
 
         private void UpdateDestination(IDictionary<string, object>[] rows)
         {
+            if (_syncSet.IsDryRun)
+            {
+                return;
+            }
+
             foreach (var row in rows)
             {
                 var updateQuery = _destinationQueryFactory.Query(_tableSchema.Name)
@@ -226,13 +288,34 @@ namespace DataTools.Sync.Core
             }
         }
 
+        private void DeleteDestination(IDictionary<string, object> row)
+        {
+            if (_syncSet.IsDryRun)
+            {
+                return;
+            }
+
+            var deleteQuery = _destinationQueryFactory.Query(_tableSchema.Name)
+                .Where(row.Where(x =>
+                        _primaryKeys.Any(pk => pk.Name == x.Key)).ToDictionary(x => x.Key, x => x.Value)
+                )
+                .AsDelete();
+
+            if (_logger.IsEnabled(LogLevel.Trace))
+            {
+                _logger.LogTrace("delete {TableName} {Sql}", _table.Name, _destinationQueryFactory.Compiler.Compile(deleteQuery).ToString());
+            }
+
+            deleteQuery.Get();
+        }
+
         private Query BuildMainQuery(QueryFactory queryFactory)
         {
             var query = queryFactory.Query(_tableSchema.Name);
 
             foreach (var column in _tableSchema.Columns)
             {
-                query.Select($"{_tableSchema.Name}.{column.Name}");
+                query.Select($"{_table.Alias ?? _tableSchema.Name}.{column.Name}");
             }
 
             if (!string.IsNullOrWhiteSpace(_table.From))
@@ -256,7 +339,7 @@ namespace DataTools.Sync.Core
             {
                 foreach (var primaryKey in _primaryKeys)
                 {
-                    query.OrderBy($"{_tableSchema.Name}.{primaryKey.Name}");
+                    query.OrderBy($"{_table.Alias ?? _tableSchema.Name}.{primaryKey.Name}");
                 }
             }
             else

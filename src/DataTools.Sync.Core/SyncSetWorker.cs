@@ -39,6 +39,11 @@ namespace DataTools.Sync.Core
                 return;
             }
 
+            if (synchronization.IsDryRun)
+            {
+                _logger.LogInformation("{SyncSetName} dry run is enabled", synchronization.Name);
+            }
+
             foreach (var table in synchronization.Tables)
             {
                 _logger.LogInformation("Table {TableName} sync started", table.Name);

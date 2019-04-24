@@ -5,8 +5,6 @@ using DataTools.Sync.Core;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Serilog;
-using Serilog.Extensions.Logging;
 
 namespace DataTools.Sync
 {
@@ -42,7 +40,15 @@ namespace DataTools.Sync
             foreach (var synchronizationSet in cfg.SynchronizationSets.Where(x => !x.IsDisabled))
             {
                 logger.LogInformation("Start {SyncSetName} sync", synchronizationSet.Name);
-                await container.GetRequiredService<ISyncSetWorker>().Sync(synchronizationSet);
+                try
+                {
+                    await container.GetRequiredService<ISyncSetWorker>().Sync(synchronizationSet);
+                }
+                catch (Exception e)
+                {
+                    logger.LogError(e, "Error {SyncSetName} sync", synchronizationSet.Name);
+                }
+
                 logger.LogInformation("End {SyncSetName} sync", synchronizationSet.Name);
             }
 

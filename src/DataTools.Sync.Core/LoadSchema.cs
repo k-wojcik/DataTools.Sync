@@ -35,17 +35,17 @@ namespace DataTools.Sync.Core
             _sourceQuery = _queryFactory.GetSource(syncSet.Name);
             _destinationQuery = _queryFactory.GetDestination(syncSet.Name);
 
-            List<TableSchema> sourceTables = (await GetTables(_sourceQuery)).ToList();
-            List<TableSchema> destinationTables = (await GetTables(_destinationQuery)).ToList();
+            List<TableSchema> sourceTables = (await GetTables(_sourceQuery)).Where(x => syncSet.Tables.Any(table => table.Name == x.Name)).ToList();
+            List<TableSchema> destinationTables = (await GetTables(_destinationQuery)).Where(x => syncSet.Tables.Any(table => table.Name == x.Name)).ToList();
 
-            foreach (var table in sourceTables.Where(x=> syncSet.Tables.Any(table=> table.Name == x.Name)))
+            foreach (var table in sourceTables)
             {
                 _logger.LogDebug("Load source table {TableName} schema", table.Name);
 
                 table.Columns = (await GetTableColumns(_sourceQuery, table.ObjectId)).ToList();
             }
 
-            foreach (var table in destinationTables.Where(x => syncSet.Tables.Any(table => table.Name == x.Name)))
+            foreach (var table in destinationTables)
             {
                 _logger.LogDebug("Load destination table {TableName} schema", table.Name);
 
@@ -75,7 +75,7 @@ namespace DataTools.Sync.Core
 
         private Task<IEnumerable<ColumnSchema>> GetTableColumns(QueryFactory queryFactory, int objectId)
         {
-            var query = _sourceQuery.Query("sys.columns AS c")
+            var query = queryFactory.Query("sys.columns AS c")
                 .Join("sys.types as t", "t.user_type_id", "c.user_type_id")
                 .Join("sys.objects as o", "o.object_id", "c.object_id")
                 .Where("c.object_id", "=", objectId)
@@ -102,7 +102,7 @@ namespace DataTools.Sync.Core
                         WHERE co.CONSTRAINT_TYPE = 'PRIMARY KEY' AND co.TABLE_NAME = o.name AND K.COLUMN_NAME = c.name
                 ), 0)  AS IsPrimaryKey");
 
-         //   string sql = _sourceQuery.Compiler.Compile(query).ToString();              
+         //   string sql = queryFactory.Compiler.Compile(query).ToString();              
 
             return query.GetAsync<ColumnSchema>();
         }
