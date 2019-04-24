@@ -137,7 +137,7 @@ namespace DataTools.Sync.Core
                 {
                     if (_table.AllowDeleteDestination == true)
                     {
-                        DeleteDestination((IDictionary<string, object>)currentSourceRow);
+                        DeleteDestination((IDictionary<string, object>)currentDestinationRow);
                     }
 
                     _destinationBuffer.TryDequeue(out currentDestinationRow);
