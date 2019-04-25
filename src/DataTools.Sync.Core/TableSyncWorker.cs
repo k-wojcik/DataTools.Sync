@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Data.SqlClient;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using DataTools.Sync.Model.Configuration;
 using DataTools.Sync.Model.Schema;
@@ -34,6 +35,12 @@ namespace DataTools.Sync.Core
         private Query _destinationQuery;
         private IList<IDictionary<string, object>> _insertBuffer = new List<IDictionary<string, object>>();
         private IList<IDictionary<string, object>> _updateBuffer = new List<IDictionary<string, object>>();
+        private ManualResetEventSlim _insertWorkerEvent = new ManualResetEventSlim();
+        private ReaderWriterLockSlim _insertDestinationLock = new ReaderWriterLockSlim();
+        private ManualResetEventSlim _updateWorkerEvent = new ManualResetEventSlim();
+        private ReaderWriterLockSlim _updateDestinationLock = new ReaderWriterLockSlim();
+        private const int SqlServerBatchLimit = 2000;
+        private CancellationTokenSource _cancellationToken = new CancellationTokenSource();
 
         public TableSyncWorker(IDbQueryFactory queryFactory, ILogger<TableSyncWorker> logger)
         {
@@ -98,12 +105,14 @@ namespace DataTools.Sync.Core
             _sourceQuery = BuildSourceQuery(BuildMainQuery(_sourceQueryFactory));
             _destinationQuery = BuildMainQuery(_destinationQueryFactory);
 
-            SetIdentityInsertOn();
+            ThreadPool.QueueUserWorkItem(InsertWorker);
+            ThreadPool.QueueUserWorkItem(UpdateWorker);
+
             Merge();
             FinalizeInsertDestination();
             FinalizeUpdateDestination();
-            SetIdentityInsertOff();
 
+            _cancellationToken.Cancel();
             _logger.LogInformation("{TableName} - sync completed", table.Name);
             return true;
         }
@@ -188,6 +197,38 @@ namespace DataTools.Sync.Core
             return MergeJoinResult.Equal;
         }
 
+        private void InsertWorker(object state)
+        {
+            int bufferMaxSize = 5000;
+            
+            while (_cancellationToken.IsCancellationRequested != true)
+            {
+                WaitHandle.WaitAny(new[] { _cancellationToken.Token.WaitHandle, _insertWorkerEvent.WaitHandle });
+
+                if (_insertBuffer.Count > bufferMaxSize)
+                {
+                    try
+                    {
+                        _insertDestinationLock.EnterWriteLock();
+
+                        var row = _insertBuffer.First();
+                        int maxInnerBatchSize = SqlServerBatchLimit / row.Keys.Count;
+
+                        Parallel.ForEach(_insertBuffer.Batch(maxInnerBatchSize), new ParallelOptions() {MaxDegreeOfParallelism = 3}, batch =>
+                        {
+                            InsertDestination(batch.ToArray());
+                        });
+                        _insertBuffer = new List<IDictionary<string, object>>();
+
+                    }
+                    finally
+                    {
+                        _insertDestinationLock.ExitWriteLock();
+                    }
+                }
+            }
+        }
+
         private void InsertDestination(IDictionary<string, object> row)
         {
             if (_syncSet.IsDryRun)
@@ -195,13 +236,16 @@ namespace DataTools.Sync.Core
                 return;
             }
 
-            int sqlServerBatchLimit = 2000;
-            if (_insertBuffer.Count * row.Keys.Count >= sqlServerBatchLimit)
+            try
             {
-                InsertDestination(_insertBuffer.ToArray());
-                _insertBuffer = new List<IDictionary<string, object>>();
+                _insertDestinationLock.EnterReadLock();
+                _insertBuffer.Add(row);
+                _insertWorkerEvent.Set();
             }
-            _insertBuffer.Add(row);
+            finally
+            {
+                _insertDestinationLock.ExitReadLock();
+            }
         }
 
         private void FinalizeInsertDestination()
@@ -213,29 +257,64 @@ namespace DataTools.Sync.Core
 
             if (_insertBuffer.Count > 0)
             {
-                InsertDestination(_insertBuffer.ToArray());
+                var row = _insertBuffer.First();
+                int maxInnerBatchSize = SqlServerBatchLimit / row.Keys.Count;
+                foreach (var batch in _insertBuffer.Batch(maxInnerBatchSize))
+                {
+                    InsertDestination(batch.ToArray());
+                }
                 _insertBuffer = new List<IDictionary<string, object>>();
+            }
+        }
+
+        private void UpdateWorker(object state)
+        {
+            int maxSizeBuffer = 5000;
+            int maxBatchSize = 1000;
+
+            while (_cancellationToken.IsCancellationRequested != true)
+            {
+                WaitHandle.WaitAny(new[] { _cancellationToken.Token.WaitHandle, _updateWorkerEvent.WaitHandle });
+
+                if (_updateBuffer.Count > maxSizeBuffer)
+                {
+                    try
+                    {
+                        _updateDestinationLock.EnterWriteLock();
+                        Parallel.ForEach(_updateBuffer.Batch(maxBatchSize), new ParallelOptions() { MaxDegreeOfParallelism = 3 }, batch => { UpdateDestination(batch.ToArray()); });
+                        _updateBuffer = new List<IDictionary<string, object>>();
+
+                    }
+                    finally
+                    {
+                        _updateDestinationLock.ExitWriteLock();
+                    }
+                }
             }
         }
 
         private void UpdateDestination(IDictionary<string, object> row)
         {
-            if (_syncSet.IsDryRun)
+            if (_syncSet.IsDryRun || _table.OnlyInsert == true)
             {
                 return;
             }
 
-            _updateBuffer.Add(row);
-            if (_updateBuffer.Count > 100)
+            try
             {
-                UpdateDestination(_updateBuffer.ToArray());
-                _updateBuffer = new List<IDictionary<string, object>>();
+                _updateDestinationLock.EnterReadLock();
+                _updateBuffer.Add(row);
+                _updateWorkerEvent.Set();
+            }
+            finally
+            {
+                _updateDestinationLock.ExitReadLock();
             }
         }
 
         private void FinalizeUpdateDestination()
         {
-            if (_syncSet.IsDryRun)
+            if (_syncSet.IsDryRun || _table.OnlyInsert == true)
             {
                 return;
             }
@@ -254,27 +333,45 @@ namespace DataTools.Sync.Core
                 return;
             }
 
+            var queryFactory = _queryFactory.GetDestination(_syncSet.Name);
+            SetIdentityInsertOn(queryFactory);
+
             var firstRow = rows.First();
-            var insertQuery = _destinationQueryFactory.Query(_tableSchema.Name).AsInsert(firstRow.Select(x=>x.Key), rows.Select(x => x.Values));
+            var insertQuery = queryFactory.Query(_tableSchema.Name).AsInsert(firstRow.Select(x=>x.Key), rows.Select(x => x.Values));
 
             if (_logger.IsEnabled(LogLevel.Trace))
             {
-                _logger.LogTrace("Insert {TableName} {Sql}", _table.Name, _destinationQueryFactory.Compiler.Compile(insertQuery).ToString());
+                _logger.LogTrace("Insert {TableName} {Sql}", _table.Name, queryFactory.Compiler.Compile(insertQuery).ToString());
             }
 
-            insertQuery.Get();
+            int retryCount = 5;
+            do
+            {
+                try
+                {
+                    insertQuery.Get();
+                    retryCount = 0;
+                }
+                catch (SqlException e)
+                {
+                    _logger.LogError(e, "{TableName} - insert error", _table.Name);
+                }
+            } while (retryCount-- > 0);
+
+            SetIdentityInsertOff(queryFactory);
         }
 
         private void UpdateDestination(IDictionary<string, object>[] rows)
         {
-            if (_syncSet.IsDryRun)
+            if (_syncSet.IsDryRun || _table.OnlyInsert == true)
             {
                 return;
             }
 
+            var queryFactory = _queryFactory.GetDestination(_syncSet.Name);
             foreach (var row in rows)
             {
-                var updateQuery = _destinationQueryFactory.Query(_tableSchema.Name)
+                var updateQuery = queryFactory.Query(_tableSchema.Name)
                     .Where(row.Where(x =>
                             _primaryKeys.Any(pk => pk.Name == x.Key)).ToDictionary(x => x.Key, x => x.Value)
                     )
@@ -282,21 +379,34 @@ namespace DataTools.Sync.Core
 
                 if (_logger.IsEnabled(LogLevel.Trace))
                 {
-                    _logger.LogTrace("update {TableName} {Sql}", _table.Name, _destinationQueryFactory.Compiler.Compile(updateQuery).ToString());
+                    _logger.LogTrace("update {TableName} {Sql}", _table.Name, queryFactory.Compiler.Compile(updateQuery).ToString());
                 }
 
-                updateQuery.Get();
+                int retryCount = 5;
+                do
+                {
+                    try
+                    {
+                        updateQuery.Get();
+                        retryCount = 0;
+                    }
+                    catch (SqlException e)
+                    {
+                        _logger.LogError(e, "{TableName} - update error", _table.Name);
+                    }
+                } while (retryCount-- > 0);
             }
         }
 
         private void DeleteDestination(IDictionary<string, object> row)
         {
-            if (_syncSet.IsDryRun)
+            if (_syncSet.IsDryRun || _table.OnlyInsert == true)
             {
                 return;
             }
 
-            var deleteQuery = _destinationQueryFactory.Query(_tableSchema.Name)
+            var queryFactory = _queryFactory.GetDestination(_syncSet.Name);
+            var deleteQuery = queryFactory.Query(_tableSchema.Name)
                 .Where(row.Where(x =>
                         _primaryKeys.Any(pk => pk.Name == x.Key)).ToDictionary(x => x.Key, x => x.Value)
                 )
@@ -304,7 +414,7 @@ namespace DataTools.Sync.Core
 
             if (_logger.IsEnabled(LogLevel.Trace))
             {
-                _logger.LogTrace("delete {TableName} {Sql}", _table.Name, _destinationQueryFactory.Compiler.Compile(deleteQuery).ToString());
+                _logger.LogTrace("delete {TableName} {Sql}", _table.Name, queryFactory.Compiler.Compile(deleteQuery).ToString());
             }
 
             deleteQuery.Get();
@@ -375,21 +485,21 @@ namespace DataTools.Sync.Core
             return input;
         }
 
-        private void SetIdentityInsertOn()
+        private void SetIdentityInsertOn(QueryFactory queryFactory)
         {
             if (_identityColumns.Any())
             {
-                _logger.LogDebug("{TableName} - set identity insert on", _table.Name);
-                _destinationQueryFactory.Statement($"SET IDENTITY_INSERT {_table.Name} ON");
+              //  _logger.LogDebug("{TableName} - set identity insert on", _table.Name);
+                queryFactory.Statement($"SET IDENTITY_INSERT {_table.Name} ON");
             }
         }
 
-        private void SetIdentityInsertOff()
+        private void SetIdentityInsertOff(QueryFactory queryFactory)
         {
             if (_identityColumns.Any())
             {
-                _logger.LogDebug("{TableName} - set identity insert off", _table.Name);
-                _destinationQueryFactory.Statement($"SET IDENTITY_INSERT {_table.Name} OFF");
+            //    _logger.LogDebug("{TableName} - set identity insert off", _table.Name);
+                queryFactory.Statement($"SET IDENTITY_INSERT {_table.Name} OFF");
             }
         }
     }

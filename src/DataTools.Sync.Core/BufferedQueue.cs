@@ -24,14 +24,22 @@ namespace DataTools.Sync.Core
         {
             lock (_lock)
             {
-                if (_buffer.TryDequeue(out elem))
+                if (_buffer.Count > 0)
                 {
+                    elem = _buffer.Dequeue();
                     TryLoadPage();
                     return true;
                 }
 
                 TryLoadPage();
-                return _buffer.TryDequeue(out elem);
+                if (_buffer.Count > 0)
+                {
+                    elem = _buffer.Dequeue();
+                    return true;
+                }
+
+                elem = default(T);
+                return false;
             }
         }
 

@@ -12,5 +12,6 @@
         public string Filter { get; set; }
 
         public bool? AllowDeleteDestination { get; set; }
+        public bool? OnlyInsert { get; set; }
     }
 }
